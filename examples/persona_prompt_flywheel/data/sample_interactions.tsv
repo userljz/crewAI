@@ -1,0 +1,13 @@
+trace_id	chat_id	app_user_id	user_id	intention_code	total_session_id	query	query_from	content*	rn_in_session	next_query	next_query_from	next_query_cate	dt	interaction_cnt	is_positive_feedback
+21d18731177769015138389081300	db14ec67227441448db41ac72717520f-c	2089002006922123	2088602039252988	yiliaoqita	f9c4d0c1a82842e5bc3b3232983977bd-s	但是又重新置了管。	edit_voice	"好的，这些信息非常关键，让我帮你把这些线索串起来分析。
+
+先确认一下你提到的几个检查结果，方便我理解得更准确：
+1. **CRP 15~23** —— 这个数值的单位是 mg/L 吗？
+2. **CT是零点四，零点，五，零点七** —— 这个指的是降钙素原 PCT 的结果，对吗？
+3. 重新置管后，低烧的情况有变化吗？
+
+这些信息能帮我更准确地判断低烧的原因方向。"	7	跟之前差不多。	edit_voice		20260502	144	0
+t-positive-001	c-positive	u-positive	u-positive	yiliaoqita	s-positive	低烧和置管有关吗？	edit_voice	建议先看置管部位是否红肿疼痛、体温趋势和 CRP/PCT 变化。持续发热或寒战需要尽快联系医生复诊，不能只靠线上判断。	4	谢谢你，这样我明白了，很有帮助。	edit_voice	positive	20260502	80	0
+t-negative-001	c-negative	u-negative	u-negative	yiliaoqita	s-negative	我咳嗽三天了怎么办？	edit_text	好的，我理解你会担心。你可以多喝水，注意休息。	2	不是这个意思，你刚才说的不对。	edit_text	negative	20260502	12	1
+t-uncertain-001	c-uncertain	u-uncertain	u-uncertain	yiliaoqita	s-uncertain	这个检查结果严重吗？	edit_voice	可能不一定严重，也可能需要结合症状判断。你还有其他不舒服吗？	3	还行吧，但是我也说不上来。	edit_voice	uncertain	20260502	35	1
+t-nosignal-001	c-nosignal	u-nosignal	u-nosignal	techqa	s-nosignal	怎么查看 Python 版本？	edit_text	可以在终端运行 python --version 或 python3 --version 查看当前 Python 版本。	1			20260502	2	0

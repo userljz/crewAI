@@ -1,0 +1,175 @@
+auto_promote_candidate_features: false
+
+feature_matrix_record_fields:
+  - trace_id
+  - profile_composite
+  - profile_intent
+  - profile_input_channel
+  - profile_session_stage
+  - profile_interaction_band
+  - profile_feedback_style
+  - semantic_feedback_label
+  - usable_for_training
+  - training_target_positive
+  - label_source
+  - label_confidence
+
+feature_matrix_csv_fields:
+  - trace_id
+  - profile_composite
+  - profile_intent
+  - semantic_feedback_label
+  - usable_for_training
+  - training_target_positive
+
+objective_extraction_prompt:
+  system: |
+    你是回答客观特征抽取员。默认 response_content 就是本次需要评估的完整回答文本。
+    不要因为回答较短、只包含澄清问题、没有结论或没有建议，就判断 response_content 不完整。
+    只有当 response_content 为空、明显被截断、或几乎全是无法解析的系统占位符/乱码时，才可以认为内容不可判断。
+    如果 response_content 明显是系统协议残片、模板字段、转义后的内部结构、乱码，或完全无法形成自然语言回答，不要强行分析其语义和结构；所有 objective feature 的 value 返回 -1，confidence 返回 0.0，evidence 说明“内容为系统噪声/乱码，无法可靠抽取”。
+    请根据 response_content 的整体语义、结构和可见文本，按 objective_features 中每个特征的 description 与 extraction_rubric 给出数量或 0/1 判断。
+    不要使用关键词命中、正则或固定前缀规则做语义判断；不确定时应基于可见文本给出保守估计，并降低 confidence。
+    返回严格 JSON，key 必须是每个 objective feature 名称；value 包含 value、confidence、evidence。
+  task: llm_extract_objective_response_features
+  output_contract:
+    value: numeric 特征返回数字；binary 特征通常只返回 0 或 1；只有当 response_content 为空、明显截断、无法解析或是系统噪声/乱码时，才允许返回 -1
+    confidence: 0.0 到 1.0 的数字；不确定时降低 confidence，但仍基于可见文本给出保守估计
+    evidence: 简短说明判断依据，必须引用 response_content 中可见的结构或语义，不要无依据声称内容不完整
+
+subjective_scoring_prompt:
+  system: |
+    你是回答质量特征评分员。请根据 subjective_features 中每个特征的 rubric，对 response_content 打 1-5 分。
+    默认 response_content 就是本次需要评价的完整回答文本；不要因为回答短、只包含澄清问题或没有结论，就声称内容不完整。
+    如果 response_content 明显是系统协议残片、模板字段、转义后的内部结构、乱码，或完全无法形成自然语言回答，不要强行评价回答质量；所有 subjective feature 的 score 返回 -1，confidence 返回 0.0，evidence 说明“内容为系统噪声/乱码，无法可靠评分”。
+    返回严格 JSON，key 必须是每个 subjective feature 名称；value 包含 score、confidence、evidence。
+  task: score_subjective_response_features
+  score_range:
+    min: 1
+    max: 5
+    missing_or_unreadable: -1
+
+candidate_discovery:
+  max_example_trace_ids: 5
+  prompt:
+    task: candidate_feature_discovery
+  rules:
+    - feature_name: over_clarification_before_answer
+      enabled: true
+      source_feature_thresholds:
+        clarifying_question_count:
+          min: 3
+        starts_with_direct_answer:
+          equals: 0
+      definition: 回答在给出任何判断方向或下一步建议前，连续提出多个澄清问题。
+      type: binary_or_ordinal
+      suggested_scale: 0/1 或 1-5
+      why_it_may_matter: 部分用户可能希望先得到方向，而不是被连续追问。
+      proposed_extraction_rubric: 判断回答是否在任何方向性建议前提出超过 2 个澄清问题。
+      status: candidate
+      auto_add_to_model: false
+
+deterministic_objective_features:
+  response_length_chars:
+    type: numeric
+    extractor: char_count
+    description: 回答包含多少个可见字符。
+  response_length_words_or_tokens:
+    type: numeric
+    extractor: token_or_word_count
+    description: 回答包含多少个中文字符、英文单词或数字 token。
+
+objective_features:
+  paragraph_count:
+    type: numeric
+    description: 回答中有多少个自然段落。
+    extraction_rubric: 根据换行和语义分段判断段落数。
+  sentence_count:
+    type: numeric
+    description: 回答中有多少个完整句子或独立语义句。
+    extraction_rubric: 根据表达是否形成独立句意来计数。
+  question_count:
+    type: numeric
+    description: 回答中提出了多少个问题。
+    extraction_rubric: 统计语义上是在询问用户、要求补充信息或确认事实的问题数量。
+  clarifying_question_count:
+    type: numeric
+    description: 回答中有多少个澄清性问题。
+    extraction_rubric: 只统计为了补足上下文、确认事实、要求用户提供更多信息的问题。
+  numbered_list_count:
+    type: numeric
+    description: 回答中有多少个编号列表项。
+    extraction_rubric: 根据结构判断编号列表项数量，包括显式数字序号或语义编号步骤。
+  bullet_count:
+    type: numeric
+    description: 回答中有多少个项目符号列表项。
+    extraction_rubric: 根据结构判断项目符号列表项数量。
+  markdown_bold_count:
+    type: numeric
+    description: 回答中有多少处加粗强调。
+    extraction_rubric: 统计可见渲染上用于强调的加粗片段数量。
+  link_count:
+    type: numeric
+    description: 回答中有多少个链接或引用 URL。
+    extraction_rubric: 统计回答提供的外部链接、Markdown 链接或裸 URL 数量。
+  code_block_count:
+    type: numeric
+    description: 回答中有多少个代码块。
+    extraction_rubric: 根据回答结构判断独立代码块数量。
+  has_table:
+    type: binary
+    description: 回答是否包含表格。
+    extraction_rubric: 如果回答以表格结构组织信息，返回 1，否则返回 0。
+  starts_with_acknowledgement:
+    type: binary
+    description: 回答开头是否先表达理解、收到、确认或承接用户问题。
+    extraction_rubric: 从语义上判断开头是否是确认/承接，而不是直接给结论。
+  starts_with_direct_answer:
+    type: binary
+    description: 回答开头是否直接给出结论、方向、判断框架或可执行建议。
+    extraction_rubric: 从语义上判断开头是否先回答核心问题，而不是先铺垫或连续追问。
+  contains_medical_safety_note:
+    type: binary
+    description: 回答是否包含医疗风险提示、安全边界或线下就医建议。
+    extraction_rubric: 如果回答提醒风险、边界、复诊、急诊或需要专业医生判断，返回 1，否则返回 0。
+  hedging_phrase_count:
+    type: numeric
+    description: 回答中有多少处不确定、保守、条件化或概率性表达。
+    extraction_rubric: 统计语义上表达不确定性、可能性、条件限制或谨慎判断的片段数量。
+  action_item_count:
+    type: numeric
+    description: 回答中有多少个用户可以执行的具体行动项。
+    extraction_rubric: 统计明确可执行的下一步、检查项、联系对象、操作命令或建议动作数量。
+
+subjective_features:
+  concision_score:
+    type: ordinal_1_5
+    rubric: 回答是否简洁，是否避免无效铺垫和重复表达。
+  empathy_score:
+    type: ordinal_1_5
+    rubric: 回答是否包含共情、安抚、理解用户处境的表达。
+  clarification_burden_score:
+    type: ordinal_1_5
+    rubric: 回答是否把过多负担转移给用户，尤其是在给出方向前连续追问过多。
+  specificity_score:
+    type: ordinal_1_5
+    rubric: 回答是否具体、有针对性，而不是泛泛而谈。
+  directness_score:
+    type: ordinal_1_5
+    rubric: 回答是否先给结论、方向、判断框架或可执行下一步。
+  actionability_score:
+    type: ordinal_1_5
+    rubric: 回答是否包含可执行建议。
+  explanation_depth_score:
+    type: ordinal_1_5
+    rubric: 回答是否解释充分，帮助用户理解原因。
+  technical_depth_score:
+    type: ordinal_1_5
+    rubric: 回答是否保留足够专业深度。
+  cognitive_load_score:
+    type: ordinal_1_5
+    rubric: 阅读负担是否高，是否过长、过密、结构复杂。
+  safety_caution_score:
+    type: ordinal_1_5
+    rubric: 是否包含必要的风险提示和安全边界。
+

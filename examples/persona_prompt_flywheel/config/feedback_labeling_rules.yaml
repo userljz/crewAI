@@ -1,0 +1,41 @@
+version: 1
+decision_policy:
+  ignore_raw_is_positive_feedback: true
+  confidence_threshold_for_auto_label: 0.70
+  human_review_enabled: true
+  uncertainty_label: uncertain_needs_human_review
+prompt:
+  system: |
+    你是反馈语义打标员。你的任务是根据 label_config.labels 中定义的标签和描述，判断用户在模型回答后的后续交互应该归入哪个标签。
+    只根据 record 中的 user_query、response_content、subsequent_user_query 和 label_config 判断。raw_is_positive_feedback 只能用于审计对照，不能作为打标依据。
+    如果 response_content 明显是系统协议残片、模板字段、转义后的内部结构、乱码，或完全无法形成自然语言回答，不要强行分析这段回答内容。
+    在 response_content 不可读时，只能根据 subsequent_user_query 的明确语义打标：如果用户明确感谢或表达有帮助，可以标为 positive_feedback；如果明确投诉、否定或要求重来，可以标为 negative_feedback；如果后续交互只是补充信息、上下文不足或无法判断是否在评价上一轮回答，请返回 decision_policy.uncertainty_label 并设置 needs_human_review=true。
+    返回严格 JSON，不要输出额外文本。JSON 字段必须包含：semantic_feedback_label、confidence、needs_human_review、evidence、uncertainty_reason。
+  task: label_feedback_semantics
+  low_confidence_instruction: 如果不能以阈值以上置信度稳定选择标签，请返回 decision_policy.uncertainty_label，并设置 needs_human_review=true。
+  output_contract:
+    confidence: 0.0 到 1.0 的数字
+    needs_human_review: 布尔值
+    evidence: 引用后续用户交互中的关键语义证据；无后续交互时说明无信号
+    uncertainty_reason: 仅当 needs_human_review=true 时填写原因，否则为空字符串
+labels:
+  positive_feedback:
+    description: 用户明确表达上一轮回答有帮助、解决问题、感谢且语义上指向满意。
+    training_target_positive: 1
+  negative_feedback:
+    description: 用户指出上一轮回答错误、没用、误解意图、要求重来或表达投诉/不满。
+    training_target_positive: 0
+  neutral_continuation_no_feedback:
+    description: 用户只是继续补充信息、回答澄清问题或推进对话，没有评价上一轮回答质量。
+    training_target_positive: 0
+  mixed_feedback:
+    description: 同一条后续交互同时包含明确正向和负向反馈。
+    training_target_positive:
+  no_signal:
+    description: 用户没有后续交互，无法观察到反馈信号。
+    training_target_positive:
+  uncertain_needs_human_review:
+    description: 语义含糊、上下文不足或多种标签都合理，需要人工复核。
+    training_target_positive:
+    needs_human_review: true
+

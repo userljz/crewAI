@@ -1,0 +1,135 @@
+random_state: 42
+training_plan:
+  label_policy: semantic_relabeling_only_ignore_raw_is_positive_feedback
+  categorical_features:
+    - profile_intent
+    - profile_input_channel
+    - profile_session_stage
+    - profile_interaction_band
+    - profile_feedback_style
+    - profile_composite
+  interaction_terms_enabled: true
+  max_interaction_features: 5000
+  min_category_count_for_interaction: 20
+  excluded_labels:
+    - no_signal
+    - uncertain_needs_human_review
+    - mixed_feedback
+  model: sklearn.linear_model.LogisticRegression
+
+training_dataset:
+  metadata_fields:
+    - trace_id
+    - profile_intent
+    - profile_input_channel
+    - profile_session_stage
+    - profile_interaction_band
+    - profile_feedback_style
+    - profile_composite
+    - semantic_feedback_label
+    - label_source
+    - label_confidence
+  default_label_source: llm_label
+
+logistic_regression:
+  label_source_policy: semantic_relabeling_only_ignore_raw_is_positive_feedback
+  status_labels:
+    insufficient_data: insufficient_data
+    trained_low_confidence: trained_low_confidence
+    trained: trained
+  penalty: l2
+  class_weight: balanced
+  max_iter: 1000
+  solver: liblinear
+  test_size: 0.2
+  min_samples_for_holdout: 20
+  min_class_samples_for_holdout: 2
+  min_total_samples_for_trained: 60
+  min_class_samples_for_trained: 30
+  near_zero_coefficient_threshold: 0.05
+  low_confidence_warning: 样本量较小，当前结果只能作为方向性信号。
+  insufficient_data_warning: 至少需要两个类别和一个可用特征才能训练模型。
+
+insights:
+  top_global_drivers: 5
+  top_segment_drivers: 3
+  top_visual_drivers: 5
+  low_support_threshold: 30
+  min_segment_samples_for_insight: 3
+  skipped_segment_reason: insufficient_positive_or_non_positive_samples
+  no_training_rows_reason: no_training_rows
+  direction_text:
+    positive: 更高取值更可能获得正反馈
+    negative: 更高取值可能降低正反馈
+  confidence_labels:
+    low: low
+    medium: medium
+  headlines:
+    insufficient_data: 样本或特征不足，当前结果只能用于流程检查，不能用于生成稳定 prompt patch。
+    trained_low_confidence: 模型已训练，但样本量较小；正样本 {n_positive} 条，非正样本 {n_non_positive} 条，洞察只能作为方向性信号。
+    trained: 模型已训练完成；正样本 {n_positive} 条，非正样本 {n_non_positive} 条，可进入人工复核和灰度验证。
+    unknown: 模型状态未知，请检查 model_report.json。
+  review_recommendations:
+    not_trained: 先把当前洞察作为低置信候选，不要直接线上启用对应 prompt patch。
+    need_more_samples: 继续补充标注样本，目标至少达到正样本 {min_positive} 条、非正样本 {min_non_positive} 条。
+    uncertain: 优先处理 {n_uncertain} 条 uncertain 样本，减少训练标签噪声。
+    no_signal: 保留 {n_no_signal} 条 no_signal 作为审计样本，但不要当作负反馈训练。
+    excluded_label: "{label}: {count} 条未进入训练，请按标签定义复核是否需要保留、改标或补充描述。"
+    skipped_segments: 检查被跳过的 segment；样本不足时只能使用全局驱动因素，不要生成强 segment 结论。
+    ready: 样本与模型状态满足基础检查，可人工复核主要驱动因素后进入灰度实验。
+
+thresholds:
+  global_train_min_positive: 30
+  global_train_min_non_positive: 30
+  segment_min_samples: 100
+  segment_min_positive: 20
+  segment_min_non_positive: 20
+
+prompt_patch_generation:
+  task: generate_prompt_patch_from_model_insight
+  status_by_model_status:
+    trained: candidate
+    default: low_confidence_candidate
+  patch_id_date_format: "%Y%m%d"
+  patch_version: v1
+  source_model_report: model_report.json
+  fallback:
+    patch_id_prefix: patch_global_low_confidence
+    profile_intent: unknown
+    profile_composite: unknown
+    trigger_condition: 样本不足时仅作为离线评估候选，不建议线上启用
+    prompt_patch: 先给出简短方向，再提出必要澄清问题；如涉及医疗风险，保持简洁安全边界。
+    do_rules:
+      - 先给方向
+      - 只问关键澄清问题
+      - 保留必要安全边界
+    dont_rules:
+      - 不要把沉默用户当作负反馈
+      - 不要默认长篇共情
+    confidence: 0.2
+    status: low_confidence_candidate
+  patch_text:
+    base: 回答时先用 1-2 句话给出方向或下一步判断框架。
+    llm_generation_guidance:
+      - 根据 positive_drivers 和 negative_drivers 的语义生成 patch，不要用字符串包含关系匹配规则。
+      - 如果模型洞察、特征证据或上游 handoff 显示样本中存在系统噪声/乱码，不要基于这些不可读内容生成具体行为建议；应保持低置信，并建议先清洗数据或人工复核。
+      - 如果洞察显示澄清负担高，优先减少连续追问并先给方向。
+      - 如果洞察显示直接性、具体性或可执行性有帮助，强化这些表达方式。
+      - 医疗相关场景必须保留不能替代医生判断、持续发热/置管/感染风险需线下复诊的安全边界。
+  do_rules:
+    base:
+      - 先给出简短方向或下一步判断框架
+      - 只提出最关键的 1-3 个澄清问题
+  dont_rules:
+    base:
+      - 不要在给出任何方向前连续提出大量问题
+      - 不要默认使用过长共情铺垫
+  confidence_by_model_status:
+    trained: 0.7
+    trained_low_confidence:
+      default: 0.45
+      skipped: 0.32
+    default: 0.25
+  runtime_example:
+    base_prompt: 你是一个可靠、有帮助的助手。
+

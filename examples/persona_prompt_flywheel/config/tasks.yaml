@@ -1,0 +1,77 @@
+feedback_labeling_task:
+  description: >
+    使用 feedback_labeling_tool 处理本次输入交互数据。读取 feedback_labeling_rules.yaml，
+    只根据用户后续交互和标签定义做语义打标，决策时必须忽略 raw_is_positive_feedback，
+    并输出 labeled_feedback.jsonl、human_review_queue.jsonl、feedback_labeling_audit.jsonl
+    以及本次标签配置快照。
+  expected_output: >
+    JSONL 输出必须包含语义反馈标签、人工复核队列记录、
+    raw_label_used_for_decision=false，以及训练目标相关字段。
+  agent: feedback_labeling_agent
+  controlled_tool: feedback_labeling_tool
+  post_tool_review:
+    - 检查 labeled_feedback.jsonl 是否有记录。
+    - 检查 raw_label_used_for_decision 是否始终为 false。
+    - 如果 response_content 是系统噪声/乱码，检查标签是否进入人工复核或有明确证据支持。
+    - 检查 uncertain 或 human_review_queue 数量是否需要提醒下一阶段。
+  handoff_contract:
+    summary: 概述标签分布、人工复核队列规模和是否可以进入特征抽取。
+    next_agent_guidance: 告诉 feature_discovery_agent 应关注哪些标签或不确定样本。
+
+feature_extraction_task:
+  description: >
+    使用 feature_extraction_tool 对每条回答执行 LLM 语义客观特征抽取和 rubric 主观特征评分。
+    同时根据 feature_config.yaml 中的候选发现规则输出候选新特征；候选特征默认不自动进入训练。
+  expected_output: >
+    输出 feature_catalog.json、feature_matrix.jsonl、feature_matrix.csv、
+    candidate_feature_discoveries.jsonl 和 feature_extraction_audit.jsonl。
+  agent: feature_discovery_agent
+  controlled_tool: feature_extraction_tool
+  post_tool_review:
+    - 检查 feature_matrix 行数是否与 labeled_feedback 行数一致。
+    - 检查每条记录是否包含客观特征和主观评分特征。
+    - 如果 response_content 是系统噪声/乱码，检查对应特征是否返回 -1 和低置信度，而不是强行分析。
+    - 检查 candidate_feature_discoveries 是否只是候选，不应自动进入训练。
+  handoff_contract:
+    summary: 概述特征矩阵规模、正式特征数量、候选特征数量。
+    next_agent_guidance: 告诉 modeling_code_agent 哪些特征或候选发现需要低置信处理。
+
+modeling_task:
+  description: >
+    使用 modeling_tool 生成受控 training_plan.json，并运行固定 sklearn 逻辑回归 sandbox。
+    训练时排除 no_signal、未解决的 uncertain、mixed feedback，以及任何只来自
+    raw_is_positive_feedback 的历史脏标签。
+  expected_output: >
+    输出 training_dataset.csv、design_matrix.csv、model_report.json、coefficients.csv、
+    segment_insights.json、model_insights.json、model_insights.md、model_card.md；
+    如果样本可训练，还应输出 model.joblib。
+  agent: modeling_code_agent
+  controlled_tool: modeling_tool
+  post_tool_review:
+    - 检查 model_report.status，并区分 trained、trained_low_confidence、insufficient_data。
+    - 检查训练样本量和正/非正样本数量是否足够。
+    - 检查是否有系统噪声/乱码样本进入训练，并在 handoff 中提示数据质量风险。
+    - 检查主要驱动因素是否只能作为方向性信号。
+  handoff_contract:
+    summary: 概述模型状态、样本量、正负样本、主要驱动因素和可靠性。
+    next_agent_guidance: 告诉 prompt_patch_generator_agent patch 应该是 candidate 还是 low_confidence_candidate。
+
+prompt_patch_generation_task:
+  description: >
+    使用 prompt_patch_generation_tool 基于 model_report.json 和 segment_insights.json
+    生成 profile × intent 条件化 prompt patch 候选。默认状态只能是 candidate
+    或 low_confidence_candidate。
+  expected_output: >
+    输出 prompt_patches.jsonl、prompt_patches.md、prompt_patch_registry.json
+    和 runtime_prompt_example.md。
+  agent: prompt_patch_generator_agent
+  controlled_tool: prompt_patch_generation_tool
+  post_tool_review:
+    - 检查每个 patch 是否有 trigger condition。
+    - 检查低置信模型生成的 patch 是否保持 low_confidence_candidate。
+    - 如果上游提示存在系统噪声/乱码样本，不要基于这些样本生成强结论 patch。
+    - 检查 runtime_prompt_example 是否可读。
+  handoff_contract:
+    summary: 概述 patch 数量、状态、置信度和人工复核建议。
+    next_agent_guidance: 给人工复核人员说明是否可以进入灰度，或仅作为离线评估候选。
+

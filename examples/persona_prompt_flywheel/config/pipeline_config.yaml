@@ -1,0 +1,79 @@
+input_schema:
+  required_canonical_columns:
+    - trace_id
+    - chat_id
+    - app_user_id
+    - user_id
+    - intention_code
+    - total_session_id
+    - user_query
+    - query_from
+    - response_content
+    - rn_in_session
+    - subsequent_user_query
+    - next_query_from
+    - next_query_cate
+    - dt
+    - interaction_cnt
+    - raw_is_positive_feedback
+  column_aliases:
+    query: user_query
+    content*: response_content
+    next_query: subsequent_user_query
+    is_positive_feedback: raw_is_positive_feedback
+    aintention_code: intention_code
+  delimiter_by_extension:
+    .tsv: "\t"
+    .csv: ","
+  delimiter_candidates: ",\t"
+  fallback_delimiter: "\t"
+
+profile_columns:
+  - real_user_segment
+  - age_group
+  - expertise_level
+  - preferred_style
+
+profile:
+  output_fields:
+    - profile_intent
+    - profile_input_channel
+    - profile_session_stage
+    - profile_interaction_band
+    - profile_feedback_style
+    - profile_composite
+  intent_source_column: intention_code
+  input_channel_source_column: query_from
+  session_stage_source_column: rn_in_session
+  interaction_count_source_column: interaction_cnt
+  default_feedback_style: unknown
+  unknown_value: unknown
+  session_stage_bins:
+    - label: early
+      max_inclusive: 2
+    - label: mid
+      max_inclusive: 8
+    - label: late
+  interaction_band_bins:
+    - label: low
+      max_exclusive: 5
+    - label: medium
+      max_exclusive: 30
+    - label: high
+  fallback_composite_fields:
+    - profile_intent
+    - profile_input_channel
+    - profile_interaction_band
+    - profile_session_stage
+
+labeling:
+  training_label_policy: positive_feedback_observed
+
+llm_execution:
+  max_workers: 4
+
+high_interaction_filter:
+  min_total_rows: 5
+  min_valid_interaction_rate: 0.3
+  high_interaction_cnt_threshold: 30
+
