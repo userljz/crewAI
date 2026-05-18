@@ -69,7 +69,7 @@ uv run --no-project --with pytest --with scikit-learn --with joblib --with pyyam
 
 - 新增 `data/synthetic_medical_feedback_5000.csv`，字段格式对齐 `converted_feedback_data.csv`，用于大数据量流程压测。
 - 使用本地 vLLM 跑 5000 条时发现默认 `llm_execution.max_workers=4` 过慢；调整为 `24`，并在 `feedback_labeling.py` / `feature_extraction.py` 增加每 250 条进度输出，便于监督长流程。
-- 发现特征抽取阶段仍按每条样本多次 LLM 调用，5000 条会拖到不可接受；新增 `feature_config.yaml.large_dataset_fast_path`，当样本数达到阈值时启用确定性语义启发式，完整产出 feature matrix，但避免逐条 LLM 评分。
+- 发现特征抽取阶段按每条样本多次 LLM 调用时会明显变慢；曾短暂验证过 `large_dataset_fast_path`，后续根据复核意见已移除，当前保留 LLM 语义判断并通过提高并发和进度输出改善可用性。
 - 发现 prompt patch 阶段可能收到非字符串 `patch_text` 并在写 Markdown 时崩溃；修复 `prompt_patch_generation.py`，将 dict/list/裸文本响应统一收敛为字符串，并新增测试。
 - 发现模型虽为 `trained`，但正样本比例低且 holdout precision 约 0.19-0.22；新增 prompt patch 质量门槛：precision 低于 0.30 时只生成全局 `low_confidence_candidate` fallback patch，避免为低质量指标生成大量 segment candidate patch。
 - 收紧 `modeling_config.yaml` 的 trained 文案，避免在指标质量不足时直接声称可灰度验证。

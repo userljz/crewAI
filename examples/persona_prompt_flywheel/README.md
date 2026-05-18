@@ -5,7 +5,7 @@
 ## 流程总览
 
 1. `feedback_labeling_agent` 通过 `feedback_labeling_tool` 读取 CSV/TSV，归一化字段、构建 profile，并用 LLM 给每条交互打语义反馈标签；随后 agent 检查标签分布和人工复核队列，输出 handoff。
-2. `feature_discovery_agent` 通过 `feature_extraction_tool` 抽取 Python 确定性客观统计、LLM 语义客观特征和 rubric 主观特征，并发现候选新特征；随后 agent 检查特征矩阵完整性，输出 handoff。
+2. `feature_discovery_agent` 通过 `feature_extraction_tool` 抽取 Python 确定性客观统计、LLM 语义客观特征和 rubric 主观特征；随后 agent 检查特征矩阵完整性，输出 handoff。
 3. `modeling_code_agent` 通过 `modeling_tool` 运行固定 sklearn 逻辑回归，分析哪些特征更容易带来正反馈；随后 agent 检查模型状态、样本量和 driver 可靠性，输出 handoff。
 4. `prompt_patch_generator_agent` 通过 `prompt_patch_generation_tool` 按 profile/intent 生成 prompt patch 候选；随后 agent 检查 patch 状态和触发条件，输出最终 handoff。
 5. `run_summary_tool` 汇总模型洞察、人工复核队列、patch registry 和调试文件。
@@ -114,7 +114,7 @@ input_schema:
 - `config/tasks.yaml`：CrewAI task 描述、expected output、绑定的受控 tool、tool 后检查项和 handoff contract。
 - `config/pipeline_config.yaml`：输入字段、profile、session 分桶、全局 pipeline 配置。
 - `config/feedback_labeling_rules.yaml`：反馈标签和 LLM 打标 prompt。
-- `config/feature_config.yaml`：确定性特征、LLM 特征抽取和候选特征发现定义。
+- `config/feature_config.yaml`：确定性特征、LLM 语义客观特征抽取和 rubric 主观特征评分定义。
 - `config/modeling_config.yaml`：逻辑回归、洞察、prompt patch 生成配置。
 
 ### `config/agents.yaml` 和 `config/tasks.yaml`
