@@ -47,8 +47,6 @@ class MockAgentAPI(UnifiedAgentAPI):
             return json.dumps(self._mock_objective_features(metadata), ensure_ascii=False)
         if operation == "subjective_feature_scoring":
             return json.dumps(self._mock_subjective_scores(metadata), ensure_ascii=False)
-        if operation == "candidate_feature_discovery":
-            return json.dumps(self._mock_candidate_feature(metadata), ensure_ascii=False)
         if operation == "prompt_patch_generation":
             return json.dumps(self._mock_prompt_patch(metadata), ensure_ascii=False)
         if operation == "agent_handoff_review":
@@ -165,13 +163,6 @@ class MockAgentAPI(UnifiedAgentAPI):
             for name, score in scores.items()
         }
 
-    def _mock_candidate_feature(self, metadata: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "feature_name": metadata.get("feature_name", "over_clarification_before_answer"),
-            "status": "candidate",
-            "auto_add_to_model": False,
-        }
-
     def _mock_prompt_patch(self, metadata: dict[str, Any]) -> dict[str, Any]:
         return {
             "patch_text": metadata.get(
@@ -204,6 +195,9 @@ class ConfigurableAgentAPI(UnifiedAgentAPI):
                 "https://openrouter.ai/api/v1/chat/completions",
             )
             self.api_key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("LLM_API_KEY")
+        elif self.provider in {"openai", "openai_compatible", "vllm"}:
+            self.endpoint = endpoint or _openai_compatible_endpoint()
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         else:
             self.endpoint = endpoint or os.getenv("UNIFIED_AGENT_API_URL")
             self.api_key = api_key or os.getenv("UNIFIED_AGENT_API_KEY")
@@ -218,7 +212,15 @@ class ConfigurableAgentAPI(UnifiedAgentAPI):
         metadata: dict[str, Any] | None = None,
     ) -> str:
         if self.provider == "openrouter":
-            return self._generate_openrouter(
+            return self._generate_openai_compatible(
+                messages,
+                temperature=temperature,
+                response_format=response_format,
+                max_tokens=max_tokens,
+                metadata=metadata,
+            )
+        if self.provider in {"openai", "openai_compatible", "vllm"}:
+            return self._generate_openai_compatible(
                 messages,
                 temperature=temperature,
                 response_format=response_format,
@@ -264,7 +266,7 @@ class ConfigurableAgentAPI(UnifiedAgentAPI):
             payload = json.loads(response.read().decode("utf-8"))
         return str(payload.get("text") or payload.get("content") or payload.get("result") or "")
 
-    def _generate_openrouter(
+    def _generate_openai_compatible(
         self,
         messages: list[dict[str, Any]],
         *,
@@ -275,11 +277,11 @@ class ConfigurableAgentAPI(UnifiedAgentAPI):
     ) -> str:
         del metadata
         if not self.endpoint:
-            raise RuntimeError("OpenRouter mode requires OPENROUTER_API_URL or the default OpenRouter endpoint.")
-        if not self.api_key:
+            raise RuntimeError("OpenAI-compatible mode requires an API endpoint.")
+        if self.provider == "openrouter" and not self.api_key:
             raise RuntimeError("OpenRouter mode requires OPENROUTER_API_KEY.")
         if not self.model:
-            raise RuntimeError("OpenRouter mode requires LLM_MODEL, for example deepseek/deepseek-chat.")
+            raise RuntimeError("OpenAI-compatible mode requires LLM_MODEL.")
 
         body: dict[str, Any] = {
             "model": self.model,
@@ -293,10 +295,12 @@ class ConfigurableAgentAPI(UnifiedAgentAPI):
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost/persona_prompt_flywheel"),
-            "X-Title": os.getenv("OPENROUTER_APP_TITLE", "Persona Prompt Flywheel"),
         }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.provider == "openrouter":
+            headers["HTTP-Referer"] = os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost/persona_prompt_flywheel")
+            headers["X-Title"] = os.getenv("OPENROUTER_APP_TITLE", "Persona Prompt Flywheel")
         req = request.Request(
             self.endpoint,
             data=json.dumps(body).encode("utf-8"),
@@ -322,6 +326,16 @@ def _openrouter_content(payload: dict[str, Any]) -> str:
             if text is not None:
                 return str(text)
     return str(payload.get("text") or payload.get("content") or payload.get("result") or "")
+
+
+def _openai_compatible_endpoint() -> str | None:
+    endpoint = os.getenv("OPENAI_API_URL") or os.getenv("LLM_API_URL")
+    if endpoint:
+        return endpoint
+    base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL")
+    if not base_url:
+        return None
+    return f"{base_url.rstrip('/')}/chat/completions"
 
 
 def _normalize_model_id(model: str | None) -> str | None:

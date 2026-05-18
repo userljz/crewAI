@@ -38,6 +38,7 @@ examples/persona_prompt_flywheel/runs/
 examples/persona_prompt_flywheel/output/
 *.joblib
 coding_agent_prompt_persona_prompt_flywheel_v2.md
+*.csv
 
 # Local env / secret variants
 .env.*

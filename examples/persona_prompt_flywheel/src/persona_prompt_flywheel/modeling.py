@@ -43,9 +43,15 @@ def run_modeling(
         model_config=modeling_config.get("logistic_regression", {}),
     )
     excluded = Counter(str(row.get("semantic_feedback_label")) for row in feature_matrix if not row.get("usable_for_training"))
+    exclusion_reasons = Counter(
+        str(row.get("training_exclusion_reason") or "label_not_usable")
+        for row in feature_matrix
+        if not row.get("usable_for_training")
+    )
     report.update(
         {
             "excluded_label_counts": dict(excluded),
+            "training_exclusion_reasons": dict(exclusion_reasons),
             "design_metadata": design_metadata,
         }
     )
@@ -213,7 +219,6 @@ def build_model_insights(
             "features_used": len(report.get("features_used", [])),
             "objective_feature_count": len(feature_catalog.get("objective_features", {})),
             "subjective_feature_count": len(feature_catalog.get("subjective_features", {})),
-            "candidate_feature_count": len(feature_catalog.get("candidate_features", [])),
             "interaction_terms_enabled": bool(report.get("interaction_terms_enabled")),
         },
         "driver_insights": {
@@ -356,7 +361,7 @@ def _write_model_insights_markdown(path: str | Path, insights: dict[str, Any]) -
         "## Feature Coverage",
         "",
         f"- Features used: {feature_summary['features_used']}",
-        f"- Objective / subjective / candidate features: {feature_summary['objective_feature_count']} / {feature_summary['subjective_feature_count']} / {feature_summary['candidate_feature_count']}",
+        f"- Objective / subjective features: {feature_summary['objective_feature_count']} / {feature_summary['subjective_feature_count']}",
         f"- Interaction terms enabled: {feature_summary['interaction_terms_enabled']}",
         "",
         "## Positive Drivers",

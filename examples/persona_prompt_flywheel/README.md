@@ -59,6 +59,18 @@ export OPENROUTER_HTTP_REFERER="https://your-app.example"
 export OPENROUTER_APP_TITLE="Persona Prompt Flywheel"
 ```
 
+如果使用本地 vLLM 或其他 OpenAI-compatible 服务：
+
+```bash
+export LLM_PROVIDER=vllm
+export LLM_MODEL=qwen3-30b-a3b
+export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
+
+python examples/persona_prompt_flywheel/run_flywheel.py \
+  --input examples/persona_prompt_flywheel/data/converted_feedback_data.csv \
+  --output runs/persona_prompt_flywheel_real
+```
+
 如果不用 OpenRouter，也可以继续接入自定义统一 HTTP endpoint：
 
 ```bash
@@ -168,16 +180,14 @@ labels:
 
 ### `config/feature_config.yaml`
 
-负责特征抽取和候选特征发现。
+负责特征抽取。
 
 - `deterministic_objective_features`：由 Python 直接计算的客观统计特征，例如字符数和 token 数。
 - `objective_features`：由 LLM 判断的语义客观特征。
 - `objective_extraction_prompt`：语义客观特征抽取 prompt，要求 LLM 返回每个特征的数量或 0/1 判断。
 - `subjective_features`：由 LLM rubric 打分的主观特征。
 - `subjective_scoring_prompt`：主观特征评分 prompt。
-- `candidate_discovery`：候选新特征发现规则。
 - `feature_matrix_record_fields` / `feature_matrix_csv_fields`：输出字段。
-- `auto_promote_candidate_features`：候选特征是否自动提升的配置标记；当前默认不自动加入训练。
 
 例如 `action_item_count`：
 
@@ -190,21 +200,6 @@ objective_features:
 ```
 
 机械统计量会由 Python 直接计算；语义客观特征会把 `description` 和 `extraction_rubric` 发给 LLM，由 LLM 根据整段回答语义返回结构化数量、置信度和证据。
-
-候选特征发现示例：
-
-```yaml
-candidate_discovery:
-  rules:
-    - feature_name: over_clarification_before_answer
-      source_feature_thresholds:
-        clarifying_question_count:
-          min: 3
-        starts_with_direct_answer:
-          equals: 0
-```
-
-候选特征会写入 `candidate_feature_discoveries.jsonl` 和 `feature_catalog.json`。默认不会参与本轮逻辑回归；要参与训练，需要沉淀到 `objective_features` 或 `subjective_features`。
 
 ### `config/modeling_config.yaml`
 
@@ -271,8 +266,7 @@ runs/persona_prompt_flywheel_demo/
 - `feedback_labeling_rules.snapshot.yaml`：本次运行使用的标签配置快照。
 - `user_feedback_stats.csv`：按用户聚合的反馈标签统计、有效交互率、正反馈率和人工复核率。
 - `feature_matrix.jsonl` / `feature_matrix.csv`：特征矩阵。
-- `feature_catalog.json`：正式特征和候选特征目录。
-- `candidate_feature_discoveries.jsonl`：候选新特征。
+- `feature_catalog.json`：正式特征目录。
 - `feature_config.resolved.yaml`：本次运行实际使用的特征配置快照。
 - `feature_extraction_audit.jsonl`：特征抽取审计记录，记录每条样本抽取了多少客观/主观特征以及使用的 LLM adapter。
 - `training_plan.json`：根据特征目录和建模配置生成的训练计划，包括数值特征、分类特征和交互项设置。

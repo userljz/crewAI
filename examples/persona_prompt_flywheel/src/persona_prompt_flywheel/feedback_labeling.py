@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 from pathlib import Path
@@ -29,6 +29,7 @@ def label_feedback(
     audit_rows: list[dict[str, Any]] = []
     max_workers = _max_workers(config)
 
+    print(f"[progress] feedback_labeling: records={len(records)} max_workers={max_workers}", flush=True)
     if max_workers == 1 or len(records) <= 1:
         results = [
             _label_feedback_record(
@@ -43,10 +44,11 @@ def label_feedback(
             for record in records
         ]
     else:
+        results = [None] * len(records)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(
-                executor.map(
-                    lambda record: _label_feedback_record(
+            futures = {
+                executor.submit(
+                    _label_feedback_record,
                         record,
                         api,
                         label_config,
@@ -54,10 +56,14 @@ def label_feedback(
                         decision_policy,
                         labeling_config,
                         profile_output_fields,
-                    ),
-                    records,
-                )
-            )
+                ): index
+                for index, record in enumerate(records)
+            }
+            for completed, future in enumerate(as_completed(futures), start=1):
+                results[futures[future]] = future.result()
+                if completed == len(records) or completed % 250 == 0:
+                    print(f"[progress] feedback_labeling: completed {completed}/{len(records)}", flush=True)
+    results = [result for result in results if result is not None]
     labeled = [output for output, _audit in results]
     audit_rows = [audit for _output, audit in results]
     review_queue = [

@@ -67,7 +67,7 @@ insights:
   headlines:
     insufficient_data: 样本或特征不足，当前结果只能用于流程检查，不能用于生成稳定 prompt patch。
     trained_low_confidence: 模型已训练，但样本量较小；正样本 {n_positive} 条，非正样本 {n_non_positive} 条，洞察只能作为方向性信号。
-    trained: 模型已训练完成；正样本 {n_positive} 条，非正样本 {n_non_positive} 条，可进入人工复核和灰度验证。
+    trained: 模型已训练完成；正样本 {n_positive} 条，非正样本 {n_non_positive} 条。请结合 holdout 指标和 prompt patch 质量门槛决定是否进入灰度验证。
     unknown: 模型状态未知，请检查 model_report.json。
   review_recommendations:
     not_trained: 先把当前洞察作为低置信候选，不要直接线上启用对应 prompt patch。
@@ -87,6 +87,10 @@ thresholds:
 
 prompt_patch_generation:
   task: generate_prompt_patch_from_model_insight
+  quality_gates:
+    min_precision_for_segment_patches: 0.30
+    min_segment_samples_for_patch: 100
+    fallback_when_quality_gate_fails: true
   status_by_model_status:
     trained: candidate
     default: low_confidence_candidate

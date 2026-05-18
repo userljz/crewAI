@@ -70,7 +70,7 @@ labeling:
   training_label_policy: positive_feedback_observed
 
 llm_execution:
-  max_workers: 4
+  max_workers: 24
 
 high_interaction_filter:
   min_total_rows: 5

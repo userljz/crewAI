@@ -61,20 +61,26 @@ def build_design_matrix(
 
     one_hot_columns: list[list[float]] = []
     one_hot_names: list[str] = []
+    one_hot_supports: list[int] = []
     for feature in categorical_features:
         levels = sorted({str(row.get(feature, "unknown")) for row in training_rows})
         metadata["categorical_levels"][feature] = levels
         for level in levels:
             one_hot_names.append(f"{feature}={level}")
-            one_hot_columns.append([1.0 if str(row.get(feature, "unknown")) == level else 0.0 for row in training_rows])
+            column = [1.0 if str(row.get(feature, "unknown")) == level else 0.0 for row in training_rows]
+            one_hot_columns.append(column)
+            one_hot_supports.append(int(sum(column)))
 
     columns = numeric_columns + one_hot_columns
     feature_names = list(numeric_features) + one_hot_names
 
     if training_plan.get("interaction_terms_enabled"):
         max_interactions = int(training_plan.get("max_interaction_features", 5000))
+        min_category_count = int(training_plan.get("min_category_count_for_interaction", 1))
         for num_name, num_col in zip(numeric_features, numeric_columns, strict=False):
-            for cat_name, cat_col in zip(one_hot_names, one_hot_columns, strict=False):
+            for cat_name, cat_col, support in zip(one_hot_names, one_hot_columns, one_hot_supports, strict=False):
+                if support < min_category_count:
+                    continue
                 if len(feature_names) >= max_interactions:
                     break
                 columns.append([a * b for a, b in zip(num_col, cat_col, strict=False)])
@@ -145,13 +151,12 @@ def train_logistic_regression(
         )
         model.fit(x_train, y_train)
         pred = model.predict(x_test)
+        eval_y = y_test
+        metrics["accuracy"] = float(accuracy_score(eval_y, pred))
+        metrics["precision"] = float(precision_score(eval_y, pred, zero_division=0))
+        metrics["recall"] = float(recall_score(eval_y, pred, zero_division=0))
     else:
         model.fit(x, y)
-        pred = model.predict(x)
-    eval_y = y_test if use_holdout else y
-    metrics["accuracy"] = float(accuracy_score(eval_y, pred))
-    metrics["precision"] = float(precision_score(eval_y, pred, zero_division=0))
-    metrics["recall"] = float(recall_score(eval_y, pred, zero_division=0))
 
     joblib.dump({"model": model, "feature_names": feature_names}, output / "model.joblib")
     coefficients = interpret_coefficients(
@@ -161,6 +166,12 @@ def train_logistic_regression(
         near_zero_threshold=float(model_config.get("near_zero_coefficient_threshold", 0.05)),
     )
     _write_csv(output / "coefficients.csv", coefficients)
+    warnings = []
+    if status == status_labels.get("trained_low_confidence"):
+        warnings.append(str(model_config.get("low_confidence_warning", "Low sample count; treat results as directional only.")))
+    if not use_holdout:
+        warnings.append("样本量不足以划分 holdout，未报告泛化指标；系数仅用于离线排查。")
+
     report = {
         "status": status,
         "label_source_policy": model_config.get("label_source_policy"),
@@ -170,9 +181,7 @@ def train_logistic_regression(
         "features_used": feature_names,
         "interaction_terms_enabled": any(" x " in name for name in feature_names),
         "metrics": metrics,
-        "warnings": [str(model_config.get("low_confidence_warning", "Low sample count; treat results as directional only."))]
-        if status == status_labels.get("trained_low_confidence")
-        else [],
+        "warnings": warnings,
     }
     return report, coefficients
 

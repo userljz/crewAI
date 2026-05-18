@@ -26,7 +26,7 @@ def test_extract_features_from_single_response(tmp_path: Path) -> None:
         }
     ]
 
-    matrix, catalog, candidates = extract_features(
+    matrix, catalog = extract_features(
         labeled,
         api=MockAgentAPI(),
         feature_config_path=root / "config" / "feature_config.yaml",
@@ -38,7 +38,6 @@ def test_extract_features_from_single_response(tmp_path: Path) -> None:
     assert matrix[0]["features"]["question_count"] == 3
     assert "clarification_burden_score" in matrix[0]["feature_evidence"]
     assert catalog["objective_features"]
-    assert candidates
     assert (tmp_path / "feature_matrix.jsonl").exists()
 
 

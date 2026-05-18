@@ -16,7 +16,6 @@ def generate_prompt_patches(
     segment_insights: dict[str, Any],
     model_report: dict[str, Any],
     feature_catalog: dict[str, Any],
-    candidate_features: list[dict[str, Any]],
     api: UnifiedAgentAPI,
     output_dir: str | Path,
     modeling_config_path: str | Path,
@@ -27,15 +26,19 @@ def generate_prompt_patches(
     status_map = patch_config.get("status_by_model_status", {})
     status = status_map.get(model_report.get("status"), status_map.get("default"))
     insights = segment_insights.get("segment_insights", [])
+    quality_gate_reason = _quality_gate_reason(model_report, patch_config)
+    usable_insights = _usable_patch_insights(insights, patch_config)
     max_workers = _max_workers(llm_execution_config)
-    if not insights:
+    if quality_gate_reason and patch_config.get("quality_gates", {}).get("fallback_when_quality_gate_fails", True):
+        patches = [_fallback_patch(model_report, feature_catalog, patch_config, quality_gate_reason=quality_gate_reason)]
+    elif not usable_insights:
         patches = [_fallback_patch(model_report, feature_catalog, patch_config)]
-    elif max_workers == 1 or len(insights) <= 1:
+    elif max_workers == 1 or len(usable_insights) <= 1:
         patches = [
             _patch_for_insight(
-                insight, segment_insights, model_report, feature_catalog, candidate_features, api, status, patch_config
+                insight, segment_insights, model_report, feature_catalog, api, status, patch_config
             )
-            for insight in insights
+            for insight in usable_insights
         ]
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -46,12 +49,11 @@ def generate_prompt_patches(
                         segment_insights,
                         model_report,
                         feature_catalog,
-                        candidate_features,
                         api,
                         status,
                         patch_config,
                     ),
-                    insights,
+                    usable_insights,
                 )
             )
 
@@ -72,7 +74,6 @@ def _patch_for_insight(
     all_insights: dict[str, Any],
     report: dict[str, Any],
     catalog: dict[str, Any],
-    candidate_features: list[dict[str, Any]],
     api: UnifiedAgentAPI,
     status: str,
     patch_config: dict[str, Any],
@@ -106,7 +107,7 @@ def _patch_for_insight(
         "profile_intent": intent,
         "profile_composite": segment,
         "trigger_condition": f"当 profile_composite={segment} 且 intention_code={intent} 时触发",
-        "prompt_patch": json.loads(api_response).get("patch_text", default_patch),
+        "prompt_patch": _patch_text_from_api_response(api_response, default_patch),
         "do_rules": _configured_rules(patch_config.get("do_rules", {})),
         "dont_rules": _configured_rules(patch_config.get("dont_rules", {})),
         "evidence": {
@@ -117,7 +118,6 @@ def _patch_for_insight(
             "model_metrics": report.get("metrics", {}),
             "excluded_label_counts": report.get("excluded_label_counts", {}),
             "raw_is_positive_feedback_used": False,
-            "candidate_features": [item.get("feature_name") for item in candidate_features],
         },
         "confidence": _patch_confidence(report, insight, patch_config),
         "status": status,
@@ -128,7 +128,13 @@ def _patch_for_insight(
     }
 
 
-def _fallback_patch(report: dict[str, Any], catalog: dict[str, Any], patch_config: dict[str, Any]) -> dict[str, Any]:
+def _fallback_patch(
+    report: dict[str, Any],
+    catalog: dict[str, Any],
+    patch_config: dict[str, Any],
+    *,
+    quality_gate_reason: str | None = None,
+) -> dict[str, Any]:
     fallback = patch_config.get("fallback", {})
     return {
         "patch_id": _patch_id(str(fallback.get("patch_id_prefix")), patch_config),
@@ -138,7 +144,12 @@ def _fallback_patch(report: dict[str, Any], catalog: dict[str, Any], patch_confi
         "prompt_patch": fallback.get("prompt_patch"),
         "do_rules": fallback.get("do_rules", []),
         "dont_rules": fallback.get("dont_rules", []),
-        "evidence": {"model_status": report.get("status"), "raw_is_positive_feedback_used": False},
+        "evidence": {
+            "model_status": report.get("status"),
+            "model_metrics": report.get("metrics", {}),
+            "quality_gate_reason": quality_gate_reason,
+            "raw_is_positive_feedback_used": False,
+        },
         "confidence": fallback.get("confidence"),
         "status": fallback.get("status"),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -146,6 +157,50 @@ def _fallback_patch(report: dict[str, Any], catalog: dict[str, Any], patch_confi
         "labeling_rule_version": 1,
         "feature_catalog_version": catalog.get("version", 1),
     }
+
+
+def _quality_gate_reason(report: dict[str, Any], patch_config: dict[str, Any]) -> str | None:
+    gates = patch_config.get("quality_gates", {})
+    if not isinstance(gates, dict):
+        return None
+    metrics = report.get("metrics", {})
+    precision = metrics.get("precision")
+    min_precision = gates.get("min_precision_for_segment_patches")
+    if precision is not None and min_precision is not None and float(precision) < float(min_precision):
+        return f"precision {float(precision):.4f} is below required {float(min_precision):.4f}"
+    return None
+
+
+def _usable_patch_insights(insights: list[dict[str, Any]], patch_config: dict[str, Any]) -> list[dict[str, Any]]:
+    gates = patch_config.get("quality_gates", {})
+    min_samples = int(gates.get("min_segment_samples_for_patch", 0)) if isinstance(gates, dict) else 0
+    return [
+        insight
+        for insight in insights
+        if not insight.get("skipped") and int(insight.get("sample_size") or 0) >= min_samples
+    ]
+
+
+def _patch_text_from_api_response(api_response: str, default_patch: str) -> str:
+    try:
+        payload = json.loads(api_response)
+    except json.JSONDecodeError:
+        text = api_response
+    else:
+        text = payload.get("patch_text", default_patch) if isinstance(payload, dict) else payload
+    if isinstance(text, str):
+        stripped = text.strip()
+        return stripped if stripped else default_patch
+    if isinstance(text, dict):
+        for key in ("instruction", "text", "summary", "prompt_patch"):
+            value = text.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return json.dumps(text, ensure_ascii=False)
+    if isinstance(text, list):
+        parts = [str(item).strip() for item in text if str(item).strip()]
+        return "；".join(parts) if parts else default_patch
+    return str(text) if text is not None else default_patch
 
 
 def _drivers_for(insight: dict[str, Any], all_insights: dict[str, Any], key: str) -> list[dict[str, Any]]:

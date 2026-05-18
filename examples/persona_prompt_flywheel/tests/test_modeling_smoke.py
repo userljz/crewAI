@@ -4,6 +4,8 @@ import argparse
 from pathlib import Path
 
 from run_flywheel import run_pipeline
+from persona_prompt_flywheel.modeling_tools import build_design_matrix
+from persona_prompt_flywheel.prompt_patch_generation import _patch_text_from_api_response, _quality_gate_reason
 
 
 def test_full_mock_pipeline(tmp_path: Path) -> None:
@@ -42,4 +44,38 @@ def test_full_mock_pipeline(tmp_path: Path) -> None:
         assert (tmp_path / "03_agent_handoffs" / f"{agent_name}_handoff.json").exists()
         assert (tmp_path / "04_debug_bundles" / "output" / agent_name / f"{agent_name}_handoff.md").exists()
     assert (tmp_path / "04_debug_bundles" / "output" / "modeling_code_agent" / "model_insights.md").exists()
+
+
+def test_interaction_terms_respect_min_category_count(tmp_path: Path) -> None:
+    rows = [
+        {"trace_id": "a", "score": 1, "segment": "rare", "training_target_positive": 1},
+        {"trace_id": "b", "score": 2, "segment": "rare", "training_target_positive": 0},
+        {"trace_id": "c", "score": 3, "segment": "other", "training_target_positive": 1},
+    ]
+    plan = {
+        "numeric_features": ["score"],
+        "categorical_features": ["segment"],
+        "interaction_terms_enabled": True,
+        "min_category_count_for_interaction": 20,
+        "max_interaction_features": 100,
+    }
+
+    _x, _y, feature_names, _metadata = build_design_matrix(rows, plan, tmp_path / "design_matrix.csv")
+
+    assert not any(" x " in name for name in feature_names)
+
+
+def test_patch_text_from_api_response_accepts_nested_dict() -> None:
+    text = _patch_text_from_api_response('{"patch_text": {"instruction": "先给结论。"}}', "fallback")
+
+    assert text == "先给结论。"
+
+
+def test_patch_quality_gate_blocks_low_precision_segment_patches() -> None:
+    reason = _quality_gate_reason(
+        {"metrics": {"precision": 0.19}},
+        {"quality_gates": {"min_precision_for_segment_patches": 0.30}},
+    )
+
+    assert "below required" in str(reason)
 

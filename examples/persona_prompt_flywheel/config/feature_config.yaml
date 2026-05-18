@@ -1,5 +1,3 @@
-auto_promote_candidate_features: false
-
 feature_matrix_record_fields:
   - trace_id
   - profile_composite
@@ -49,26 +47,6 @@ subjective_scoring_prompt:
     max: 5
     missing_or_unreadable: -1
 
-candidate_discovery:
-  max_example_trace_ids: 5
-  prompt:
-    task: candidate_feature_discovery
-  rules:
-    - feature_name: over_clarification_before_answer
-      enabled: true
-      source_feature_thresholds:
-        clarifying_question_count:
-          min: 3
-        starts_with_direct_answer:
-          equals: 0
-      definition: 回答在给出任何判断方向或下一步建议前，连续提出多个澄清问题。
-      type: binary_or_ordinal
-      suggested_scale: 0/1 或 1-5
-      why_it_may_matter: 部分用户可能希望先得到方向，而不是被连续追问。
-      proposed_extraction_rubric: 判断回答是否在任何方向性建议前提出超过 2 个澄清问题。
-      status: candidate
-      auto_add_to_model: false
-
 deterministic_objective_features:
   response_length_chars:
     type: numeric
@@ -78,48 +56,48 @@ deterministic_objective_features:
     type: numeric
     extractor: token_or_word_count
     description: 回答包含多少个中文字符、英文单词或数字 token。
-
-objective_features:
   paragraph_count:
     type: numeric
+    extractor: paragraph_count
     description: 回答中有多少个自然段落。
-    extraction_rubric: 根据换行和语义分段判断段落数。
+  question_count:
+    type: numeric
+    extractor: question_count
+    description: 回答中提出了多少个问题。
+  numbered_list_count:
+    type: numeric
+    extractor: numbered_list_count
+    description: 回答中有多少个编号列表项。
+  bullet_count:
+    type: numeric
+    extractor: bullet_count
+    description: 回答中有多少个项目符号列表项。
+  markdown_bold_count:
+    type: numeric
+    extractor: markdown_bold_count
+    description: 回答中有多少处加粗强调。
+  link_count:
+    type: numeric
+    extractor: link_count
+    description: 回答中有多少个链接或引用 URL。
+  code_block_count:
+    type: numeric
+    extractor: code_block_count
+    description: 回答中有多少个代码块。
+  has_table:
+    type: binary
+    extractor: has_table
+    description: 回答是否包含表格。
+
+objective_features:
   sentence_count:
     type: numeric
     description: 回答中有多少个完整句子或独立语义句。
-    extraction_rubric: 根据表达是否形成独立句意来计数。
-  question_count:
-    type: numeric
-    description: 回答中提出了多少个问题。
-    extraction_rubric: 统计语义上是在询问用户、要求补充信息或确认事实的问题数量。
+    extraction_rubric: 根据表达是否形成独立句意来计数；value 必须与 evidence 中列举的句子数量一致。
   clarifying_question_count:
     type: numeric
     description: 回答中有多少个澄清性问题。
-    extraction_rubric: 只统计为了补足上下文、确认事实、要求用户提供更多信息的问题。
-  numbered_list_count:
-    type: numeric
-    description: 回答中有多少个编号列表项。
-    extraction_rubric: 根据结构判断编号列表项数量，包括显式数字序号或语义编号步骤。
-  bullet_count:
-    type: numeric
-    description: 回答中有多少个项目符号列表项。
-    extraction_rubric: 根据结构判断项目符号列表项数量。
-  markdown_bold_count:
-    type: numeric
-    description: 回答中有多少处加粗强调。
-    extraction_rubric: 统计可见渲染上用于强调的加粗片段数量。
-  link_count:
-    type: numeric
-    description: 回答中有多少个链接或引用 URL。
-    extraction_rubric: 统计回答提供的外部链接、Markdown 链接或裸 URL 数量。
-  code_block_count:
-    type: numeric
-    description: 回答中有多少个代码块。
-    extraction_rubric: 根据回答结构判断独立代码块数量。
-  has_table:
-    type: binary
-    description: 回答是否包含表格。
-    extraction_rubric: 如果回答以表格结构组织信息，返回 1，否则返回 0。
+    extraction_rubric: 只统计为了补足上下文、确认事实、要求用户提供更多信息的问题；不要把反问式标题或表格中的问题列名计为澄清问题。
   starts_with_acknowledgement:
     type: binary
     description: 回答开头是否先表达理解、收到、确认或承接用户问题。
@@ -130,8 +108,11 @@ objective_features:
     extraction_rubric: 从语义上判断开头是否先回答核心问题，而不是先铺垫或连续追问。
   contains_medical_safety_note:
     type: binary
-    description: 回答是否包含医疗风险提示、安全边界或线下就医建议。
-    extraction_rubric: 如果回答提醒风险、边界、复诊、急诊或需要专业医生判断，返回 1，否则返回 0。
+    description: 医疗或健康建议类回答是否包含医疗风险提示、安全边界或线下就医建议。
+    extraction_rubric: |
+      只有回答正在给出医学/健康判断，且提醒持续症状、感染风险、急诊、复诊、检查、用药边界或需要医生判断时才返回 1。
+      如果回答讨论的是保险、退保、客服热线、长护险、行政流程、支付流程、财务规划、普通生活建议，即使出现“护理”“医院”“热线”等词，也不要算作医疗安全提示，返回 0。
+      必须基于上下文语义判断，不要只根据关键词命中。
   hedging_phrase_count:
     type: numeric
     description: 回答中有多少处不确定、保守、条件化或概率性表达。

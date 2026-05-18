@@ -144,7 +144,6 @@ class FeatureExtractionTool(ControlledPipelineTool):
         "feature_catalog.json",
         "feature_matrix.jsonl",
         "feature_matrix.csv",
-        "candidate_feature_discoveries.jsonl",
         "feature_extraction_audit.jsonl",
     ]
 
@@ -152,7 +151,7 @@ class FeatureExtractionTool(ControlledPipelineTool):
         return [state["output_dir"] / "labeled_feedback.jsonl", state["feature_config_path"]]
 
     def _run(self, state: dict[str, Any]) -> None:
-        feature_matrix, feature_catalog, candidate_features = extract_features(
+        feature_matrix, feature_catalog = extract_features(
             state["labeled"],
             api=state["api"],
             feature_config_path=state["feature_config_path"],
@@ -163,7 +162,6 @@ class FeatureExtractionTool(ControlledPipelineTool):
             {
                 "feature_matrix": feature_matrix,
                 "feature_catalog": feature_catalog,
-                "candidate_features": candidate_features,
             }
         )
 
@@ -176,11 +174,10 @@ class FeatureExtractionTool(ControlledPipelineTool):
 
     def metadata(self, state: dict[str, Any]) -> dict[str, Any]:
         return {
-            "agent_role": "response feature extraction and candidate discovery",
+            "agent_role": "response feature extraction",
             "controlled_tool": self.name,
             "records_in": len(state.get("labeled", [])),
             "feature_rows_out": len(state.get("feature_matrix", [])),
-            "candidate_feature_count": len(state.get("candidate_features", [])),
         }
 
 
@@ -245,7 +242,6 @@ class PromptPatchGenerationTool(ControlledPipelineTool):
             state["output_dir"] / "segment_insights.json",
             state["output_dir"] / "model_report.json",
             state["output_dir"] / "feature_catalog.json",
-            state["output_dir"] / "candidate_feature_discoveries.jsonl",
             state["modeling_config_path"],
         ]
 
@@ -254,7 +250,6 @@ class PromptPatchGenerationTool(ControlledPipelineTool):
             segment_insights=state["segment_insights"],
             model_report=state["model_report"],
             feature_catalog=state["feature_catalog"],
-            candidate_features=state["candidate_features"],
             api=state["api"],
             output_dir=state["output_dir"],
             modeling_config_path=state["modeling_config_path"],
@@ -268,7 +263,6 @@ class PromptPatchGenerationTool(ControlledPipelineTool):
             "segment_insights": state.get("segment_insights", {}),
             "model_report": state.get("model_report", {}),
             "feature_catalog": state.get("feature_catalog", {}),
-            "candidate_features": state.get("candidate_features", []),
         }
 
     def metadata(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -291,7 +285,6 @@ class RunSummaryTool:
             state.get("model_report", {}),
             state.get("segment_insights", {}),
             state.get("patches", []),
-            state.get("candidate_features", []),
             state.get("normalization_warnings", []),
         )
         artifact_dirs = _organize_run_artifacts(state["output_dir"])
@@ -455,7 +448,6 @@ STAGE_ARTIFACT_FILES = {
     "feature_catalog.json",
     "feature_matrix.jsonl",
     "feature_matrix.csv",
-    "candidate_feature_discoveries.jsonl",
     "feature_extraction_audit.jsonl",
     "training_plan.json",
     "training_dataset.csv",
@@ -547,41 +539,40 @@ def _write_run_summary(
     model_report: dict[str, Any],
     segment_insights: dict[str, Any],
     patches: list[dict[str, Any]],
-    candidate_features: list[dict[str, Any]],
     warnings: list[str],
 ) -> dict[str, Any]:
     counts = Counter(row["semantic_feedback_label"] for row in labeled)
-    training_rows = [row for row in labeled if row.get("usable_for_training")]
+    training_rows = int(model_report.get("n_samples") or 0)
     positive = ", ".join(driver["feature"] for driver in segment_insights.get("global_insights", {}).get("positive_drivers", [])[:3]) or "无"
     negative = ", ".join(driver["feature"] for driver in segment_insights.get("global_insights", {}).get("negative_drivers", [])[:3]) or "无"
     skipped = segment_insights.get("skipped_segments", [])
     summary = {
         "total_rows": len(labeled),
         "raw_is_positive_feedback_ignored": True,
-        "training_rows": len(training_rows),
+        "training_rows": training_rows,
         "model_status": model_report.get("status"),
         "prompt_patch_count": len(patches),
-        "candidate_feature_count": len(candidate_features),
         "human_review_queue_count": len(review_queue),
         "agent_debug_output_dir": str(output_dir / "04_debug_bundles" / "output"),
         "model_insights_path": str(output_dir / "01_core_results" / "model_insights.md"),
     }
     summary.update({label: count for label, count in sorted(counts.items())})
     label_count_lines = "\n".join(f"- {label}: {count}" for label, count in sorted(counts.items())) or "- 无标签"
-    excluded_counts = Counter(row["semantic_feedback_label"] for row in labeled if not row.get("usable_for_training"))
+    excluded_counts = model_report.get("excluded_label_counts", {})
     excluded_lines = "\n".join(f"- {label}: {count}" for label, count in sorted(excluded_counts.items())) or "- 无排除标签"
+    exclusion_reasons = model_report.get("training_exclusion_reasons", {})
+    reason_lines = "\n".join(f"- {reason}: {count}" for reason, count in sorted(exclusion_reasons.items())) or "- 无排除原因"
     text = f"""# Persona Prompt Flywheel Run Summary
 
 - 读入样本数: {len(labeled)}
 - raw_is_positive_feedback 是否被忽略: 是
-- 训练使用样本数: {len(training_rows)}
+- 训练使用样本数: {training_rows}
 - 模型状态: {model_report.get('status')}
 - 模型洞察报告: {output_dir / '01_core_results' / 'model_insights.md'}
 - 主要正向驱动因素: {positive}
 - 主要负向驱动因素: {negative}
 - 生成 candidate prompt patch 数: {len(patches)}
 - 样本不足跳过的 segment: {', '.join(item['segment'] for item in skipped) or '无'}
-- 候选新特征数: {len(candidate_features)}
 - 人工审核队列条数: {len(review_queue)}
 - Agent debug 输出目录: {output_dir / '04_debug_bundles' / 'output'}
 - normalization warnings: {', '.join(warnings) or '无'}
@@ -597,6 +588,9 @@ def _write_run_summary(
 
 ## 未进入训练的标签分布
 {excluded_lines}
+
+## 未进入训练的原因
+{reason_lines}
 """
     (output_dir / "run_summary.md").write_text(text, encoding="utf-8")
     return summary

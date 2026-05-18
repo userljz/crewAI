@@ -21,20 +21,17 @@ feedback_labeling_task:
 feature_extraction_task:
   description: >
     使用 feature_extraction_tool 对每条回答执行 LLM 语义客观特征抽取和 rubric 主观特征评分。
-    同时根据 feature_config.yaml 中的候选发现规则输出候选新特征；候选特征默认不自动进入训练。
   expected_output: >
-    输出 feature_catalog.json、feature_matrix.jsonl、feature_matrix.csv、
-    candidate_feature_discoveries.jsonl 和 feature_extraction_audit.jsonl。
+    输出 feature_catalog.json、feature_matrix.jsonl、feature_matrix.csv 和 feature_extraction_audit.jsonl。
   agent: feature_discovery_agent
   controlled_tool: feature_extraction_tool
   post_tool_review:
     - 检查 feature_matrix 行数是否与 labeled_feedback 行数一致。
     - 检查每条记录是否包含客观特征和主观评分特征。
     - 如果 response_content 是系统噪声/乱码，检查对应特征是否返回 -1 和低置信度，而不是强行分析。
-    - 检查 candidate_feature_discoveries 是否只是候选，不应自动进入训练。
   handoff_contract:
-    summary: 概述特征矩阵规模、正式特征数量、候选特征数量。
-    next_agent_guidance: 告诉 modeling_code_agent 哪些特征或候选发现需要低置信处理。
+    summary: 概述特征矩阵规模和正式特征数量。
+    next_agent_guidance: 告诉 modeling_code_agent 哪些特征需要低置信处理。
 
 modeling_task:
   description: >
